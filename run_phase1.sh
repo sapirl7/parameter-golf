@@ -86,6 +86,17 @@ case "${1:-help}" in
         echo "Next: bash run_phase1.sh exp0"
         ;;
     
+    smoke)
+        echo "=== Smoke test: 20 steps, verify nothing crashes ==="
+        run_experiment "smoke" \
+            QAT_START_FRAC=0.50 \
+            LAMBDA_L1=0.00001 \
+            L1_START_FRAC=0.50 \
+            ITERATIONS=20 \
+            VAL_LOSS_EVERY=10
+        echo "Smoke passed! Ready for real experiments."
+        ;;
+    
     exp0)
         echo "=== Exp 0: Baseline reproduction (QAT disabled) ==="
         echo "Goal: Verify Phase 1 code reproduces baseline ~1.2244 BPB"
@@ -169,12 +180,13 @@ case "${1:-help}" in
         echo ""
         echo "Commands:"
         echo "  setup    - Clone fork, download data, verify script"
+        echo "  smoke    - Quick 20-step test (verifies all code paths)"
         echo "  exp0     - Baseline reproduction (QAT disabled)"
         echo "  exp1     - QAT only (measure quant gap reduction)"
         echo "  exp2     - QAT + L1 sweep (5 runs, find optimal lambda)"
         echo "  results  - Show all experiment results"
         echo "  compare  - Show comparison table"
         echo ""
-        echo "Run in order: setup → exp0 → exp1 → exp2"
+        echo "Run in order: setup → smoke → exp0 → exp1 → exp2"
         ;;
 esac
