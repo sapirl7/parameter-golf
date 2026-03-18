@@ -48,8 +48,8 @@ run_experiment() {
     echo ""
     echo "=== RESULTS for $run_id ==="
     local logfile="logs/${run_id}.txt"
-    if [ -f "$logfile" ]; then
-        grep -E "(val_bpb|val_loss|final_int8|qat_alpha|model_params)" "$logfile" | tail -20
+    if [ -f "logs/${run_id}.txt" ]; then
+        grep -E "(val_bpb|val_loss|final_int8|qat_alpha|model_params|weight_sparsity|Serialized model)" "logs/${run_id}.txt" | tail -20 || true
     else
         echo "(log file not found at $logfile)"
     fi
@@ -123,7 +123,7 @@ case "${1:-help}" in
             logfile="$REPO_DIR/logs/exp2_l1_${LAMBDA}.txt"
             if [ -f "$logfile" ]; then
                 bpb=$(grep "final_int8_zlib_roundtrip_exact" "$logfile" | tail -1 | sed -n 's/.*val_bpb:\([0-9.]*\).*/\1/p')
-                bytes=$(grep "int8_zlib_model_bytes\|Serialized model int8" "$logfile" | tail -1 | sed -n 's/.*: \([0-9]*\) bytes.*/\1/p')
+                bytes=$(grep "Serialized model int8+zlib:" "$logfile" | tail -1 | sed -n 's/.*: \([0-9]*\) bytes.*/\1/p')
                 echo "  lambda=$LAMBDA  bpb=${bpb:-?}  bytes=${bytes:-?}"
             fi
         done
@@ -138,7 +138,7 @@ case "${1:-help}" in
             if [ -f "$logfile" ]; then
                 run=$(basename "$logfile" .txt)
                 echo "--- $run ---"
-                grep -E "(final_int8_zlib_roundtrip|model_params|int8_zlib)" "$logfile" | tail -5
+                grep -E "(final_int8_zlib_roundtrip|model_params|Serialized model|weight_sparsity)" "$logfile" | tail -5 || true
                 echo ""
             fi
         done

@@ -178,6 +178,42 @@ Non-record submissions should be made in the same fashion as SOTA records, as de
 
 The `train_gpt.py` and `train_gpt_mlx.py` scripts are intended as good launching-off points for new participants, not SOTA configs. We'll accept PRs that tune, improve, or simplify these scripts without significantly increasing complexity, but the best models should stay in the `/records` folder.
 
+## Phase 1: QAT + L1 Sparsity (This Fork)
+
+This fork adds `train_gpt_phase1.py` — a direct fork of the baseline with two compression techniques:
+
+- **Quantization-Aware Training (QAT):** Fake INT8 per-row quantization via STE detach trick, gradually blended in during the last 20% of training
+- **Proximal L1 regularization:** Post-optimizer soft-thresholding to encourage weight sparsity for better zlib compression
+
+### Quickstart (RunPod)
+
+```bash
+cd /workspace
+git clone https://github.com/sapirl7/parameter-golf.git
+cd parameter-golf
+bash run_phase1.sh setup    # download data, verify script
+bash run_phase1.sh exp0     # baseline reproduction (~1.22 BPB)
+bash run_phase1.sh exp1     # QAT only
+bash run_phase1.sh exp2     # QAT + L1 sweep (5 runs)
+bash run_phase1.sh compare  # results table
+```
+
+### Key env vars
+
+| Variable | Default | Description |
+|---|---|---|
+| `QAT_START_FRAC` | 0.80 | When to start QAT (fraction of training). Set to 2.0 to disable |
+| `LAMBDA_L1` | 0.0 | L1 regularization strength. 0 = disabled |
+| `L1_START_FRAC` | 0.85 | When to start L1 (fraction of training) |
+
+### Files
+
+| File | Description |
+|---|---|
+| `train_gpt_phase1.py` | Forked baseline with QAT + L1 (+80 lines vs baseline) |
+| `run_phase1.sh` | Experiment runner for RunPod |
+| `train_gpt.py` | Original baseline (unchanged) |
+
 ## Support
 
 
