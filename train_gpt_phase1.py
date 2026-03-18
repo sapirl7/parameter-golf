@@ -523,11 +523,13 @@ class RMSNorm(nn.Module):
 
 
 def _fq_row(w: Tensor) -> Tensor:
-    """Fake INT8 per-row quantization using amax (fast STE surrogate)."""
+    """Fake INT8 per-row quantization matching the real quantize_float_tensor path."""
     w32 = w.float()
-    ca = w32.abs().amax(dim=1, keepdim=True).clamp_min(1e-8)
-    s = ca / 127.0
-    return (torch.round(w32 / s).clamp(-127, 127) * s)
+    clip_abs = torch.quantile(w32.abs(), INT8_CLIP_Q, dim=1, keepdim=True)
+    clip_abs = clip_abs.clamp_min(1.0 / 127.0)
+    clipped = torch.clamp(w32, -clip_abs, clip_abs)
+    scale = clip_abs / 127.0
+    return (torch.round(clipped / scale).clamp(-127, 127) * scale)
 
 
 class CastedLinear(nn.Linear):
@@ -1004,8 +1006,8 @@ def main() -> None:
     # -----------------------------
 
     training_time_ms = 0.0
-    _alpha = 1e-10   # Phase 1 v2.2: init for QAT schedule
-    _progress = 0.0  # Phase 1 v2.2: init for training progress
+    qat_alpha = 1e-10   # Phase 1 v2.2: current QAT blending factor
+    train_progress = 0.0  # Phase 1 v2.2: fraction of training completed
     stop_after_step: int | None = None
     torch.cuda.synchronize()
     t0 = time.perf_counter()
@@ -1032,9 +1034,18 @@ def main() -> None:
             )
             log0(
                 f"step:{step}/{args.iterations} val_loss:{val_loss:.4f} val_bpb:{val_bpb:.4f} "
-                f"qat_alpha:{_alpha:.4f} "
+                f"qat_alpha:{qat_alpha:.4f} "
                 f"train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms / max(step, 1):.2f}ms"
             )
+            # Phase 1 v2.2: Log weight sparsity for L1 debugging
+            total_w, near_zero_w = 0, 0
+            with torch.no_grad():
+                for p in base_model.parameters():
+                    if p.ndim == 2 and p.numel() > 65_536:
+                        total_w += p.numel()
+                        near_zero_w += (p.abs() < 1e-6).sum().item()
+            if total_w > 0:
+                log0(f"  weight_sparsity:{near_zero_w / total_w:.4f} ({near_zero_w}/{total_w})")
             torch.cuda.synchronize()
             t0 = time.perf_counter()
 
@@ -1050,17 +1061,17 @@ def main() -> None:
         scale = lr_mul(step, elapsed_ms)
         # --- Phase 1 v2.2: QAT alpha schedule ---
         if max_wallclock_ms and training_time_ms > 0:
-            _progress = training_time_ms / max_wallclock_ms
+            train_progress = training_time_ms / max_wallclock_ms
         else:
-            _progress = step / max(args.iterations, 1)
-        if _progress < args.qat_start_frac:
-            _alpha = 1e-10
+            train_progress = step / max(args.iterations, 1)
+        if train_progress < args.qat_start_frac:
+            qat_alpha = 1e-10
         else:
-            _alpha = min(1.0, (_progress - args.qat_start_frac) / (1.0 - args.qat_start_frac))
+            qat_alpha = min(1.0, (train_progress - args.qat_start_frac) / (1.0 - args.qat_start_frac))
         with torch.no_grad():
-            for _m in base_model.modules():
-                if isinstance(_m, CastedLinear) and hasattr(_m, "qat_alpha"):
-                    _m.qat_alpha.fill_(_alpha)
+            for module in base_model.modules():
+                if isinstance(module, CastedLinear) and hasattr(module, "qat_alpha"):
+                    module.qat_alpha.fill_(qat_alpha)
 
         zero_grad_all()
         train_loss = torch.zeros((), device=device)
@@ -1089,14 +1100,14 @@ def main() -> None:
             opt.step()
 
         # --- Phase 1 v2.2: Proximal L1 soft-threshold (post-optimizer-step, Muon-safe) ---
-        if args.lambda_l1 > 0 and _progress >= args.l1_start_frac:
-            _eff_lr = optimizer_muon.param_groups[0]["lr"]
-            _tau = _eff_lr * args.lambda_l1
-            if _tau > 0:
+        if args.lambda_l1 > 0 and train_progress >= args.l1_start_frac:
+            eff_lr = optimizer_muon.param_groups[0]["lr"]
+            tau = eff_lr * args.lambda_l1
+            if tau > 0:
                 with torch.no_grad():
-                    for _n, _p in base_model.named_parameters():
-                        if _p.ndim == 2 and _p.numel() > 65_536:
-                            _p.copy_(_p.sign() * torch.clamp(_p.abs() - _tau, min=0.0))
+                    for name, param in base_model.named_parameters():
+                        if param.ndim == 2 and param.numel() > 65_536:
+                            param.copy_(param.sign() * torch.clamp(param.abs() - tau, min=0.0))
 
         zero_grad_all()
 
