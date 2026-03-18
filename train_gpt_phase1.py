@@ -523,13 +523,17 @@ class RMSNorm(nn.Module):
 
 
 def _fq_row(w: Tensor) -> Tensor:
-    """Fake INT8 per-row quantization matching the real quantize_float_tensor path."""
+    """Fake INT8 per-row quantization for QAT.
+
+    Uses amax instead of quantile for speed: this runs on every forward pass
+    during QAT, so O(n) amax >> O(n log n) quantile. For typical weight
+    distributions, amax ≈ quantile(99.99984%). The exact quantile clipping
+    only matters in the one-shot post-training quantizer (quantize_float_tensor).
+    """
     w32 = w.float()
-    clip_abs = torch.quantile(w32.abs(), INT8_CLIP_Q, dim=1, keepdim=True)
-    clip_abs = clip_abs.clamp_min(1.0 / 127.0)
-    clipped = torch.clamp(w32, -clip_abs, clip_abs)
+    clip_abs = w32.abs().amax(dim=1, keepdim=True).clamp_min(1.0 / 127.0)
     scale = clip_abs / 127.0
-    return (torch.round(clipped / scale).clamp(-127, 127) * scale)
+    return (torch.round(w32 / scale).clamp(-127, 127) * scale)
 
 
 class CastedLinear(nn.Linear):
@@ -1101,8 +1105,10 @@ def main() -> None:
 
         # --- Phase 1 v2.2: Proximal L1 soft-threshold (post-optimizer-step, Muon-safe) ---
         if args.lambda_l1 > 0 and train_progress >= args.l1_start_frac:
+            # Gradual L1 warmup to avoid loss spikes when L1 kicks in
+            l1_frac = min(1.0, (train_progress - args.l1_start_frac) / max(1.0 - args.l1_start_frac, 1e-9))
             eff_lr = optimizer_muon.param_groups[0]["lr"]
-            tau = eff_lr * args.lambda_l1
+            tau = eff_lr * args.lambda_l1 * l1_frac
             if tau > 0:
                 with torch.no_grad():
                     for name, param in base_model.named_parameters():
