@@ -1,0 +1,50 @@
+==========================================================
+STAGE 1: HARDWARE ALIGNMENT MICROBENCHMARK (8xH100)
+==========================================================
+This script profiles system speed (ms/step) across 3 
+architecture widths. It does NOT evaluate val_bpb.
+Each configuration runs for ~180 seconds and is force-killed.
+Validation is DISABLED to prevent skewing the step times.
+==========================================================
+
+--- Cluster Environment Snapshot ---
+45bbccff356439d2f0b0dbae06cc3fa58b9576ed
+[git commit captured]
+NVIDIA H100 80GB HBM3, 81559 MiB
+NVIDIA H100 80GB HBM3, 81559 MiB
+NVIDIA H100 80GB HBM3, 81559 MiB
+NVIDIA H100 80GB HBM3, 81559 MiB
+NVIDIA H100 80GB HBM3, 81559 MiB
+Python 3.12.3
+torch: 2.9.1+cu128
+------------------------------------
+
+--- Smoke check (120s, dim=512, checking log format) ---
+  (torch.compile takes ~60-90s cold start — waiting for first step_avg: line)
+[PASS] 'step_avg:' found in smoke log.
+step:934/20000 train_loss:2.3625 train_time:93212ms step_avg:99.80ms
+step:935/20000 train_loss:2.3392 train_time:93306ms step_avg:99.79ms
+step:936/20000 train_loss:2.2966 train_time:93400ms step_avg:99.79ms
+
+
+---> Starting benchmark: dim512_h8_kv4
+Wait ~180 seconds for profiling to complete...
+Completed 1537 logged steps before 180s timeout.
+=> step_avg (last stable value): 99.97 ms/step
+=> ESTIMATED STEPS IN 600s:      6002
+
+---> Starting benchmark: dim544_h8_kv4
+Wait ~180 seconds for profiling to complete...
+Completed 868 logged steps before 180s timeout.
+=> step_avg (last stable value): 125.66 ms/step
+=> ESTIMATED STEPS IN 600s:      4775
+
+---> Starting benchmark: dim576_h9_kv3
+Wait ~180 seconds for profiling to complete...
+Completed 1102 logged steps before 180s timeout.
+=> step_avg (last stable value): 108.51 ms/step
+=> ESTIMATED STEPS IN 600s:      5529
+
+==========================================================
+Preflight Stage 1 complete. Logs saved in records/preflight_logs/
+==========================================================
