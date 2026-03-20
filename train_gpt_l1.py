@@ -64,6 +64,10 @@ class Hyperparameters:
     # Each token gets seq_len - swe_stride tokens of left context instead of
     # at most seq_len. Typical values: 256 or 512.
     swe_stride = int(os.environ.get("SWE_STRIDE", 0))
+    # SWE during periodic val burns training budget; disable by default.
+    # Enable at the end for final candidate scoring only.
+    swe_on_periodic_val = bool(int(os.environ.get("SWE_ON_PERIODIC_VAL", "0")))
+    swe_on_final_val = bool(int(os.environ.get("SWE_ON_FINAL_VAL", "1")))
 
     # Model shape.
     vocab_size = int(os.environ.get("VOCAB_SIZE", 1024))
@@ -393,13 +397,16 @@ def run_primary_eval(
     base_bytes_lut: "Tensor",
     has_leading_space_lut: "Tensor",
     is_boundary_token_lut: "Tensor",
+    use_swe: bool = False,
 ) -> "tuple[float, float]":
-    """Canonical eval dispatcher: SWE if SWE_STRIDE > 0, else standard.
+    """Canonical eval dispatcher: SWE if SWE_STRIDE > 0 AND use_swe=True, else standard.
 
     Must be used for BOTH periodic validation steps and the final roundtrip eval
     so that the metric is always in the same eval mode — no surprises at submission.
+    Pass use_swe=args.swe_on_periodic_val for training-loop calls and
+    use_swe=args.swe_on_final_val for the end-of-training roundtrip call.
     """
-    if args.swe_stride > 0:
+    if use_swe and args.swe_stride > 0:
         return eval_val_swe(
             args, model, rank, world_size, device,
             val_tokens, base_bytes_lut, has_leading_space_lut,
@@ -1185,6 +1192,25 @@ def main() -> None:
     log0(f"val_bpb:enabled tokenizer_kind=sentencepiece tokenizer_path={args.tokenizer_path}")
     log0(f"train_loader:dataset:{dataset_dir.name} train_shards:{actual_train_files}")
     log0(f"val_loader:shards pattern={args.val_files} tokens:{val_tokens.numel() - 1}")
+    # Candidate shape guard — catches misconfigured experiments before training starts.
+    if args.model_dim % args.num_heads != 0:
+        raise ValueError(
+            f"model_dim ({args.model_dim}) must be divisible by num_heads ({args.num_heads})"
+        )
+    if args.num_heads % args.num_kv_heads != 0:
+        raise ValueError(
+            f"num_heads ({args.num_heads}) must be divisible by num_kv_heads ({args.num_kv_heads})"
+        )
+    _head_dim = args.model_dim // args.num_heads
+    log0(
+        f"candidate_shape:model_dim={args.model_dim} num_heads={args.num_heads} "
+        f"num_kv_heads={args.num_kv_heads} head_dim={_head_dim} "
+        f"({'power-of-2' if (_head_dim & (_head_dim - 1)) == 0 else 'NON-power-of-2 — suboptimal for FlashAttn'})"
+    )
+    log0(
+        f"eval_config:swe_stride={args.swe_stride} swe_on_periodic={args.swe_on_periodic_val} "
+        f"swe_on_final={args.swe_on_final_val} enable_ttt={args.enable_ttt}"
+    )
 
     # -----------------------------
     # MODEL + OPTIMIZER SETUP
@@ -1349,6 +1375,7 @@ def main() -> None:
             val_loss, val_bpb = run_primary_eval(
                 args, model, rank, world_size, device, grad_accum_steps,
                 val_tokens, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
+                use_swe=args.swe_on_periodic_val,
             )
             log0(
                 f"step:{step}/{args.iterations} val_loss:{val_loss:.4f} val_bpb:{val_bpb:.4f} "
@@ -1477,6 +1504,7 @@ def main() -> None:
     q_val_loss, q_val_bpb = run_primary_eval(
         args, model, rank, world_size, device, grad_accum_steps,
         val_tokens, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
+        use_swe=args.swe_on_final_val,
     )
     torch.cuda.synchronize()
     log0(
@@ -1509,6 +1537,7 @@ def main() -> None:
             f"final_int8_ttt_lora val_loss:{ttt_val_loss:.4f} val_bpb:{ttt_val_bpb:.4f} "
             f"eval_time:{1000.0 * (time.perf_counter() - t_ttt):.0f}ms"
         )
+        log0(f"final_int8_ttt_lora_exact val_loss:{ttt_val_loss:.8f} val_bpb:{ttt_val_bpb:.8f}")
     else:
         log0("final_int8_ttt_lora skipped (ENABLE_TTT=0). Set ENABLE_TTT=1 with eval timing proof.")
 
