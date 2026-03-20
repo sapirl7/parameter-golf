@@ -14,9 +14,13 @@ SEED="${SEED:-1337}"
 export RUN_ID="${RUN_ID:-record_l1_dim576_swe_seed${SEED}}"
 export SEED="${SEED}"
 
+# ---- Resolve repo root relative to this records folder ----
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+
 # ---- Data / tokenizer ----
-export DATA_PATH="${DATA_PATH:-../../data/datasets/fineweb10B_sp1024}"
-export TOKENIZER_PATH="${TOKENIZER_PATH:-../../data/tokenizers/fineweb_1024_bpe.model}"
+export DATA_PATH="${DATA_PATH:-${REPO_ROOT}/data/datasets/fineweb10B_sp1024}"
+export TOKENIZER_PATH="${TOKENIZER_PATH:-${REPO_ROOT}/data/tokenizers/fineweb_1024_bpe.model}"
 export VOCAB_SIZE="${VOCAB_SIZE:-1024}"
 
 # ---- Candidate shape (selected from H100 preflight) ----
