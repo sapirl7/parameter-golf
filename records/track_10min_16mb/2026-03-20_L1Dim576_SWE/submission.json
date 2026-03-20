@@ -1,0 +1,18 @@
+{
+  "name": "Anton S.",
+  "github_id": "sapirl7",
+  "run_name": "L1Dim576_SWE",
+  "track": "track_10min_16mb",
+  "record_folder": "records/track_10min_16mb/2026-03-20_L1Dim576_SWE",
+  "model": "GPT 9L dim576 h9 kv3 tied embeddings",
+  "val_bpb": null,
+  "seed": 1337,
+  "hardware": "8x H100 80GB",
+  "training_time_limit_seconds": 600,
+  "tokenizer": "fineweb_1024_bpe.model",
+  "dataset": "fineweb10B_sp1024",
+  "eval_method": "Sliding Window Eval (final-only)",
+  "compression_method": "INT8 + zlib with post-step proximal L1 soft-thresholding",
+  "commit": "REPLACE_WITH_GIT_COMMIT",
+  "notes": "Hardware-aligned dim576/h9/kv3 selected via H100 preflight (108ms vs 125ms for dim544); SWE final-only; TTT disabled."
+}
